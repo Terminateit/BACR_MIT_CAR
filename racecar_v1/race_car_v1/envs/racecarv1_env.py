@@ -21,6 +21,8 @@ class CarRaceV1Env(gym.Env):
                                     np.array([0, 0, 50])) 
         self.physicsClient = p.connect(p.GUI)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())  # used by loadURDF
+        self.lastControlTime = time.time()
+        self.lastLidarTime = time.time()
         self._seed()
 
     def _seed(self, seed=None):
@@ -42,18 +44,19 @@ class CarRaceV1Env(gym.Env):
     def _reset(self):
         self.vt = 0 # current velocity pf the wheels
         self.maxV = 120 # max lelocity, 235RPM = 24,609142453 rad/sec
+        self.dw = 0 # current velocity pf the wheels
+        self.maxW = 120 # max lelocity, 235RPM = 24,609142453
+
         self.envStepCounter = 0
         p.resetSimulation()
         p.setGravity(0, 0,-10) # m/s^2
         p.setTimeStep(1./120.) # the duration of a step in sec
-        print(os.path.abspath(os.getcwd()))
         planeId = p.loadSDF("/race_car_v1/envs/meshes/barca_track.sdf", globalScaling=1)
         # planeId = p.loadURDF("plane.urdf")
-        robotStartPos = [0,0,.3]
-        robotStartOrientation = p.getQuaternionFromEuler([self.np_random.uniform(low=-
-        0.3, high=0.3),0,0])
+        robotStartPos = [0,0,0.15]
+        robotStartOrientation = p.getQuaternionFromEuler([0,0,self.np_random.uniform(low=-
+        1.57, high=1.57)])
         path = os.path.abspath(os.path.dirname(__file__))
-        print(path)
         self.car = p.loadURDF(os.path.join(path, "racecar.xml"), robotStartPos, robotStartOrientation)
         
         for wheel in range(p.getNumJoints(self.car)):
@@ -90,28 +93,31 @@ class CarRaceV1Env(gym.Env):
 
         self.steering = [0,2]
 
-        hokuyo_joint=4
-        zed_camera_joint = 5
+        self.hokuyo_joint=4
+        self.zed_camera_joint = 5
 
         replaceLines=True
-        numRays=100
-        rayFrom=[]
-        rayTo=[]
-        rayIds=[]
-        rayHitColor = [1,0,0]
-        rayMissColor = [0,1,0]
+        self.numRays=100
+        self.rayFrom=[]
+        self.rayTo=[]
+        self.rayIds=[]
+        self.rayHitColor = [1,0,0]
+        self.rayMissColor = [0,1,0]
         rayLen = 8
         rayStartLen=0.25
-        for i in range (numRays):
-            #rayFrom.append([0,0,0])
-            rayFrom.append([rayStartLen*math.sin(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/numRays), rayStartLen*math.cos(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/numRays),0])
-            rayTo.append([rayLen*math.sin(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/numRays), rayLen*math.cos(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/numRays),0])
+        for i in range (self.numRays):
+            #self.rayFrom.append([0,0,0])
+            self.rayFrom.append([rayStartLen*math.sin(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/self.numRays), rayStartLen*math.cos(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/self.numRays),0])
+            self.rayTo.append([rayLen*math.sin(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/self.numRays), rayLen*math.cos(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/self.numRays),0])
             if (replaceLines):
-                rayIds.append(p.addUserDebugLine(rayFrom[i], rayTo[i], rayMissColor,parentObjectUniqueId=self.car, parentLinkIndex=hokuyo_joint ))
+                self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor,parentObjectUniqueId=self.car, parentLinkIndex=self.hokuyo_joint ))
             else:
-                rayIds.append(-1)
+                self.rayIds.append(-1)
         prevCarYaw = self.getCarYaw(self.car)
         self.observation = self.compute_observation()
+
+        self.lastControlTime = time.time()
+        self.lastLidarTime = time.time()
         return np.array(self.observation)
  
     def _render(self, mode='human', close=False):
@@ -127,7 +133,6 @@ class CarRaceV1Env(gym.Env):
         vt = np.clip(self.vt + dv, -self.maxV, self.maxV)
         self.vt = vt
         for wheel in self.wheels:
-            print(wheel)
             p.setJointMotorControl2(self.car,wheel,p.VELOCITY_CONTROL,targetVelocity=self.vt,force=50)
         for steer in self.steering:
             p.setJointMotorControl2(self.car,steer,p.POSITION_CONTROL,targetPosition=-self.vt)
@@ -141,41 +146,32 @@ class CarRaceV1Env(gym.Env):
 
     def compute_observation(self):
         # camInfo = p.getDebugVisualizerCamera()
-        lastTime = time.time()
-        lastControlTime = time.time()
-        lastLidarTime = time.time()
 
-        nowControlTime = time.time()
-	
-        nowLidarTime = time.time()
+        self.nowControlTime = time.time()
+
+        self.nowLidarTime = time.time()
         #lidar at 20Hz
-        if (nowLidarTime-lastLidarTime>.3):
-            #print("Lidar!")
+        if (self.nowLidarTime-self.lastLidarTime>.3):
+            print("Lidar!")
             numThreads=0
-            results = p.rayTestBatch(rayFrom,rayTo,numThreads, parentObjectUniqueId=car, parentLinkIndex=hokuyo_joint)
-            for i in range (numRays):
+            results = p.rayTestBatch(self.rayFrom,self.rayTo,numThreads, parentObjectUniqueId=self.car, parentLinkIndex=self.hokuyo_joint)
+            for i in range (self.numRays):
                 hitObjectUid=results[i][0]
                 hitFraction = results[i][2]
                 hitPosition = results[i][3]
                 if (hitFraction==1.):
-                    p.addUserDebugLine(rayFrom[i],rayTo[i], rayMissColor,replaceItemUniqueId=rayIds[i],parentObjectUniqueId=car, parentLinkIndex=hokuyo_joint)
+                    p.addUserDebugLine(self.rayFrom[i],self.rayTo[i], self.rayMissColor,replaceItemUniqueId=self.rayIds[i],parentObjectUniqueId=self.car, parentLinkIndex=self.hokuyo_joint)
                 else:
-                    localHitTo = [rayFrom[i][0]+hitFraction*(rayTo[i][0]-rayFrom[i][0]),
-                                                rayFrom[i][1]+hitFraction*(rayTo[i][1]-rayFrom[i][1]),
-                                                rayFrom[i][2]+hitFraction*(rayTo[i][2]-rayFrom[i][2])]
-                    p.addUserDebugLine(rayFrom[i],localHitTo, rayHitColor,replaceItemUniqueId=rayIds[i],parentObjectUniqueId=car, parentLinkIndex=hokuyo_joint)
-            lastLidarTime = nowLidarTime
+                    localHitTo = [self.rayFrom[i][0]+hitFraction*(self.rayTo[i][0]-self.rayFrom[i][0]),
+                                                self.rayFrom[i][1]+hitFraction*(self.rayTo[i][1]-self.rayFrom[i][1]),
+                                                self.rayFrom[i][2]+hitFraction*(self.rayTo[i][2]-self.rayFrom[i][2])]
+                    p.addUserDebugLine(self.rayFrom[i],localHitTo, self.rayHitColor,replaceItemUniqueId=self.rayIds[i],parentObjectUniqueId=self.car, parentLinkIndex=self.hokuyo_joint)
+            self.lastLidarTime = self.nowLidarTime
             
         #control at 100Hz
         carPos,carOrn = p.getBasePositionAndOrientation(self.car)
 
-        # Keep the previous orientation of the camera set by the user.
-        
-        # yaw = camInfo[8]
-        # pitch = camInfo[9]
-        # distance = camInfo[10]
-        # targetPos = camInfo[11]
-        # camFwd = camInfo[5]
+
         carYaw = self.getCarYaw(self.car)
         cubeEuler = p.getEulerFromQuaternion(carOrn)
         linear, angular = p.getBaseVelocity(self.car)

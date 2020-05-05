@@ -6,43 +6,52 @@ from gym import error, spaces, utils
 from gym.utils import seeding
 
 import os
+import time
 import numpy as np
+from PIL import Image
+
 import pybullet as p
 import pybullet_data 
 
-STATE_W = 96
-STATE_H = 96
-VIDEO_W = 600
-VIDEO_H = 600
-WINDOW_W = 1000
-WINDOW_H = 800
 
-FPS = 50
+IMAGE_W = 320
+IMAGE_H = 320
 
 class CarRaceEnv(gym.Env):
     metadata = {
-        'render.modes': ['human', 'rgb_array', 'state_pixels'],
-        'video.frames_per_second' : FPS
+        'render.modes': ['human', 'rgb_array'],
+        'video.frames_per_second' : 60
     }
  
+
     def __init__(self):
         self.seed()
-        self.physicsClient = p.connect(p.GUI)
-        p.setAdditionalSearchPath(pybullet_data.getDataPath())  # used by loadURDF
+        self.viewer = None
 
-        p.setGravity(0, 0, -9.81)
-        useRealTimeSim = 0
+        p.connect(p.GUI)
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())  # used by loadURDF    
 
-        p.setTimeStep(1./120.)
-        p.setRealTimeSimulation(useRealTimeSim)
+        # Joint numbers
+        self.lidar_joint = 4
+        self.camera_joint = 5
+        self.rearWheels = [8, 15]
+        self.steerWheels = [0, 2]
 
     
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
-    def reset(self, model_name, track_name):
+
+    def reset(self, model_name, track_name, useRealTimeSim):
+        self.useRealTimeSim = useRealTimeSim
+
         p.resetSimulation()
+
+        p.setGravity(0, 0, -9.81)
+    
+        p.setTimeStep(1./120.)
+        p.setRealTimeSimulation(self.useRealTimeSim)
 
         model_path = os.path.join(os.path.dirname(__file__), 'f10_racecar', model_name)
         if not os.path.exists(model_path):
@@ -57,25 +66,123 @@ class CarRaceEnv(gym.Env):
         self.seed()
 
         carPos = [0, 0, 0.15]
-        carOrientation = p.getQuaternionFromEuler([0, 0, self.np_random.uniform(low=-1.57, high=1.57)])
+        carOrientation = p.getQuaternionFromEuler([0, 0, self.np_random.uniform(low=-np.pi/8+np.pi/3, high=np.pi/8+np.pi/3)])
         path = os.path.abspath(os.path.dirname(__file__))
         self.car = p.loadURDF(model_path, carPos, carOrientation) 
+
+        ### !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        for wheel in range(p.getNumJoints(self.car)):
+            # print("joint[",wheel,"]=", p.getJointInfo(self.car, wheel))
+            p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
+            p.getJointInfo(self.car, wheel)	
+
+        c = p.createConstraint(self.car,9,self.car,11,jointType=p.JOINT_GEAR, jointAxis=[0,1,0],parentFramePosition=[0,0,0],childFramePosition=[0,0,0])
+        p.changeConstraint(c,gearRatio=1, maxForce=10000)
+        c = p.createConstraint(self.car,10,self.car,13,jointType=p.JOINT_GEAR, jointAxis=[0,1,0],parentFramePosition=[0,0,0],childFramePosition=[0,0,0])
+        p.changeConstraint(c,gearRatio=-1, maxForce=10000)
+        c = p.createConstraint(self.car,9,self.car,13,jointType=p.JOINT_GEAR, jointAxis=[0,1,0],parentFramePosition=[0,0,0],childFramePosition=[0,0,0])
+        p.changeConstraint(c,gearRatio=-1, maxForce=10000)
+        c = p.createConstraint(self.car,16,self.car,18,jointType=p.JOINT_GEAR, jointAxis=[0,1,0],parentFramePosition=[0,0,0],childFramePosition=[0,0,0])
+        p.changeConstraint(c,gearRatio=1, maxForce=10000)
+        c = p.createConstraint(self.car,16,self.car,19,jointType=p.JOINT_GEAR, jointAxis=[0,1,0],parentFramePosition=[0,0,0],childFramePosition=[0,0,0])
+        p.changeConstraint(c,gearRatio=-1, maxForce=10000)
+        c = p.createConstraint(self.car,17,self.car,19,jointType=p.JOINT_GEAR, jointAxis=[0,1,0],parentFramePosition=[0,0,0],childFramePosition=[0,0,0])
+        p.changeConstraint(c,gearRatio=-1, maxForce=10000)
+
+        c = p.createConstraint(self.car,1,self.car,18,jointType=p.JOINT_GEAR, jointAxis=[0,1,0],parentFramePosition=[0,0,0],childFramePosition=[0,0,0])
+        p.changeConstraint(c,gearRatio=-1, gearAuxLink = 15, maxForce=10000)
+        c = p.createConstraint(self.car,3,self.car,19,jointType=p.JOINT_GEAR, jointAxis=[0,1,0],parentFramePosition=[0,0,0],childFramePosition=[0,0,0])
+        p.changeConstraint(c,gearRatio=-1, gearAuxLink = 15,maxForce=10000)
+
+        #self.targetVelocitySlider = p.addUserDebugParameter("wheelVelocity",-50,50,0)
+        #self.maxForceSlider = p.addUserDebugParameter("maxForce",0,50,20)
+        #self.steeringSlider = p.addUserDebugParameter("steering",-1,1,0)
+
+        self.numRays=100
+        self.rayFrom = []
+        self.rayTo = []
+        self.rayIds = []
+        self.rayHitColor = [1, 0, 0]
+        self.rayMissColor = [0, 1, 0]
+        rayLen = 8
+        rayStartLen=0.25
+        for i in range (self.numRays):
+            self.rayFrom.append([rayStartLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
+                            rayStartLen*np.cos(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
+                            0
+                            ])
+
+            self.rayTo.append([rayLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
+                          rayLen*np.cos(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
+                          0
+                          ])
+
+            self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
+
+        self.lastCameraTime = time.time()
+        self.lastLidarTime = time.time()
+
+    def getCarYaw(self):
+        carPosition, carOrientation = p.getBasePositionAndOrientation(self.car)
+        carEuler = p.getEulerFromQuaternion(carOrientation)
+        carYaw = (carEuler[2]*360)/(2.*np.pi) - 90
+        return carYaw
+
 
     def step(self, action):
         step_reward = 0
         done = False
-        return self.state, step_reward, done, {}
-    
-    def snapshot(self):
-        # Camera sensor number
-        camera_joint = 5
 
+        self.currentLidarTime = time.time()
+
+        # Update lidar data (20Hz)
+        if (self.currentLidarTime - self.lastLidarTime > .3):
+            self.lastLidarTime = self.currentLidarTime
+
+            numThreads = 0
+            results = p.rayTestBatch(self.rayFrom, self.rayTo, numThreads, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
+            for i in range (self.numRays):
+                hitObjectUid = results[i][0]
+                hitFraction = results[i][2]
+                hitPosition = results[i][3]
+                if (hitFraction == 1.):
+                    p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, replaceItemUniqueId=self.rayIds[i], parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
+                else:
+                    localHitTo = [self.rayFrom[i][0] + hitFraction*(self.rayTo[i][0] - self.rayFrom[i][0]),
+                                                self.rayFrom[i][1] + hitFraction*(self.rayTo[i][1] - self.rayFrom[i][1]),
+                                                self.rayFrom[i][2] + hitFraction*(self.rayTo[i][2] - self.rayFrom[i][2])]
+                    p.addUserDebugLine(self.rayFrom[i], localHitTo, self.rayHitColor,replaceItemUniqueId=self.rayIds[i],parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
+
+
+        maxForce = 2 #p.readUserDebugParameter(self.maxForceSlider)
+        targetVelocity = 2.5 #p.readUserDebugParameter(self.targetVelocitySlider)
+        steeringAngle = 0 #p.readUserDebugParameter(self.steeringSlider)
+
+        for wheel in self.rearWheels:
+            p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=targetVelocity, force=maxForce)
+            
+        for steer in self.steerWheels:
+            p.setJointMotorControl2(self.car, steer, p.POSITION_CONTROL, targetPosition=-steeringAngle)
+            
+        if (self.useRealTimeSim == 0):
+            p.stepSimulation()
+
+        return 0 # self.state, step_reward, done, {}
+    
+
+    def snapshot(self):
         # Create camera projection matrix
-        cameraInfo = p.getDebugVisualizerCamera()
-        projectionMatrix = cameraInfo[3]
+        # cameraInfo = p.getDebugVisualizerCamera()
+        # projectionMatrix = cameraInfo[3]
+
+        fov = 60
+        aspect = 1.0
+        nearPlane = 0.01
+        farPlane = 100
+        projectionMatrix = p.computeProjectionMatrixFOV(fov, aspect, nearPlane, farPlane)
  
         # Get camera eye position (in Cartesian world coordinates) and orientation
-        cameraState = p.getLinkState(self.car, camera_joint, computeForwardKinematics=True)       
+        cameraState = p.getLinkState(self.car, self.camera_joint, computeForwardKinematics=True)       
         eyePosition = cameraState[0]
         eyeOrientation = cameraState[1]
 
@@ -93,21 +200,42 @@ class CarRaceEnv(gym.Env):
 
         viewMatrix = p.computeViewMatrix(eyePosition, cameraTarget, cameraUpVector)
 
-        width, height, rgbImg, depthImg, segImg = p.getCameraImage(width=320,
-                                                                   height=320,
+        width, height, rgbImg, depthImg, segImg = p.getCameraImage(width=IMAGE_W,
+                                                                   height=IMAGE_H,
                                                                    viewMatrix=viewMatrix,
                                                                    projectionMatrix=projectionMatrix)
         
         return rgbImg
 
+
     def render(self, mode='human'):
-        assert mode in ['human', 'state_pixels', 'rgb_array']
-        
-        rgbImg = self.snapshot()
-        
-        pass
+        assert mode in ['human', 'rgb_array']
+
+        self.currentCameraTime = time.time()
+
+        # Update camera data (60Hz)
+        if (self.currentCameraTime - self.lastCameraTime > 1/5):
+            self.lastCameraTime = self.currentCameraTime
+
+            rgbaImg = self.snapshot()
+
+            rgbImg = Image.fromarray(rgbaImg).convert('RGB')
+            rgbImg = np.array(rgbImg)
+
+            if mode == 'rgb_array':
+                return rgbImg
+            elif mode == 'human':
+                from gym.envs.classic_control import rendering
+                if self.viewer is None:
+                    self.viewer = rendering.SimpleImageViewer()
+                self.viewer.imshow(rgbImg)
+                return self.viewer.isopen
 
 
+    def close(self):
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer = None
 
 
 

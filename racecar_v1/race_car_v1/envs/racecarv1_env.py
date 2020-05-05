@@ -51,13 +51,16 @@ class CarRaceV1Env(gym.Env):
         p.resetSimulation()
         p.setGravity(0, 0,-10) # m/s^2
         p.setTimeStep(1./120.) # the duration of a step in sec
-        planeId = p.loadSDF("/race_car_v1/envs/meshes/barca_track.sdf", globalScaling=1)
+        useRealTimeSim = 0
+        p.setRealTimeSimulation(useRealTimeSim) # either this
+
+        planeId = p.loadSDF("/race_car_v1/envs/f10_racecar/meshes/barca_track.sdf", globalScaling=1)
         # planeId = p.loadURDF("plane.urdf")
         robotStartPos = [0,0,0.15]
         robotStartOrientation = p.getQuaternionFromEuler([0,0,self.np_random.uniform(low=-
         1.57, high=1.57)])
         path = os.path.abspath(os.path.dirname(__file__))
-        self.car = p.loadURDF(os.path.join(path, "racecar.xml"), robotStartPos, robotStartOrientation)
+        self.car = p.loadURDF(os.path.join(path, "f10_racecar/racecar_differential.urdf"), robotStartPos, robotStartOrientation)
         
         for wheel in range(p.getNumJoints(self.car)):
             # print("joint[",wheel,"]=", p.getJointInfo(self.car,wheel))
@@ -106,19 +109,23 @@ class CarRaceV1Env(gym.Env):
         rayLen = 8
         rayStartLen=0.25
         for i in range (self.numRays):
-            #self.rayFrom.append([0,0,0])
             self.rayFrom.append([rayStartLen*math.sin(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/self.numRays), rayStartLen*math.cos(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/self.numRays),0])
             self.rayTo.append([rayLen*math.sin(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/self.numRays), rayLen*math.cos(-0.5*0.25*2.*math.pi+0.75*2.*math.pi*float(i)/self.numRays),0])
             if (replaceLines):
                 self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor,parentObjectUniqueId=self.car, parentLinkIndex=self.hokuyo_joint ))
             else:
                 self.rayIds.append(-1)
+
         prevCarYaw = self.getCarYaw(self.car)
         self.observation = self.compute_observation()
 
         self.lastControlTime = time.time()
         self.lastLidarTime = time.time()
-        return np.array(self.observation)
+        lineId = p.addUserDebugLine([0,0,0],[0,0,1],[1,0,0])
+        lineId2 = p.addUserDebugLine([0,0,0],[0,0,1],[1,0,0])
+        lineId3= p.addUserDebugLine([0,0,0],[0,0,1],[1,0,0])
+        print("lineId=",lineId)
+        return self.step(None)[0] #np.array(self.observation)
  
     def _render(self, mode='human', close=False):
         if (self.connectmode == 0):
@@ -133,9 +140,9 @@ class CarRaceV1Env(gym.Env):
         vt = np.clip(self.vt + dv, -self.maxV, self.maxV)
         self.vt = vt
         for wheel in self.wheels:
-            p.setJointMotorControl2(self.car,wheel,p.VELOCITY_CONTROL,targetVelocity=self.vt,force=50)
+            p.setJointMotorControl2(self.car,wheel,p.VELOCITY_CONTROL,targetVelocity=self.vt,force=100)
         for steer in self.steering:
-            p.setJointMotorControl2(self.car,steer,p.POSITION_CONTROL,targetPosition=-self.vt)
+            p.setJointMotorControl2(self.car,steer,p.POSITION_CONTROL,targetPosition=self.vt)
 
     def getCarYaw(self,car):
         carPos,carOrn = p.getBasePositionAndOrientation(car)
@@ -169,13 +176,15 @@ class CarRaceV1Env(gym.Env):
             self.lastLidarTime = self.nowLidarTime
             
         #control at 100Hz
-        carPos,carOrn = p.getBasePositionAndOrientation(self.car)
+        if (self.nowControlTime-self.lastControlTime>.01):
+            carPos,carOrn = p.getBasePositionAndOrientation(self.car)
 
-
-        carYaw = self.getCarYaw(self.car)
-        cubeEuler = p.getEulerFromQuaternion(carOrn)
-        linear, angular = p.getBaseVelocity(self.car)
-        return (np.array([cubeEuler[0],angular[0],self.vt], dtype='float32'))
+            carYaw = self.getCarYaw(self.car)
+            cubeEuler = p.getEulerFromQuaternion(carOrn)
+            linear, angular = p.getBaseVelocity(self.car)
+            return (np.array([cubeEuler[0],angular[0],self.vt], dtype='float32'))
+        else:
+            pass    
 
     def compute_reward(self):
         # receive a bonus of 1 for balancing and pay a small cost proportional to speed
@@ -184,7 +193,7 @@ class CarRaceV1Env(gym.Env):
     def compute_done(self):
         # episode ends when the barycentre of the robot is too low or after 500 steps
         cubePos, _ = p.getBasePositionAndOrientation(self.car)
-        return cubePos[2] < 0.15 or self.envStepCounter >= 500  
+        return self.envStepCounter >= 100  
 
 
 

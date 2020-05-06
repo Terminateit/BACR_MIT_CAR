@@ -3,14 +3,13 @@ import racecar_v2
 
 track_name = 'barca_track.sdf'
 model_name = 'racecar_differential.urdf'
+useRealTimeSim = 0
 
 env = gym.make('racecar-v2')
-env.reset(model_name, track_name)
-env.render(mode='human')
+env.reset(model_name, track_name, useRealTimeSim)
 
-for _ in range(100000):
-    for _ in range(1000000):
-        a = 5**100
-    env.render(mode='human')
-    #env.step(env.action_space.sample()) # take a random action
-#env.close()
+while(True):
+    env.render()
+    observation, step_reward, done, _ =  env.step(env.action_space.sample())
+    
+env.close()

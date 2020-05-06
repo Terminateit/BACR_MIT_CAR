@@ -51,7 +51,7 @@ class CarRaceEnv(gym.Env):
         return [seed]
 
 
-    def reset(self, model_name=None, track_name=None, time=5000.0, dt=1./120., cameraStatus=False):
+    def reset(self, model_name=None, track_name=None, dt=1./120., cameraStatus=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0
@@ -63,9 +63,11 @@ class CarRaceEnv(gym.Env):
             track_name = 'barca_track.sdf'
 
         self.dt = dt
-        self.time = time
 
         self.cameraStatus = cameraStatus
+
+        self.stopThrehold = 100 # if the car is stuck more then this number of steps - reset
+        self.stuckCounter = 0 # reset stuck counter
 
         p.resetSimulation()
 
@@ -91,7 +93,8 @@ class CarRaceEnv(gym.Env):
         path = os.path.abspath(os.path.dirname(__file__))
         self.car = p.loadURDF(model_path, carPos, carOrientation)
 
-        self.snapshot = self.takeSnapshot()
+        if self.cameraStatus is True:
+            self.snapshot = self.takeSnapshot()
 
         self.observation = np.zeros(self.numRays, dtype=np.int)
 
@@ -203,15 +206,19 @@ class CarRaceEnv(gym.Env):
         p.stepSimulation()
 
         self.currentTime += self.dt
-        
-        if self.currentTime >= self.time:
-            done = True
-        else:
-            done = False
 
         carVelocity = p.getBaseVelocity(self.car)[0] # get linear velocity only
         carSpeed = np.linalg.norm(carVelocity)
         reward = carSpeed*self.dt
+
+        if carSpeed <= 0.1:
+            self.stuckCounter += 1
+            #print(self.stuckCounter, carSpeed)
+            
+        if self.stuckCounter >= self.stopThrehold:
+            done = True
+        else:
+            done = False
 
         return self.observation, reward, done, {}
     

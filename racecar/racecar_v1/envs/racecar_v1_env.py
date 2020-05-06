@@ -93,7 +93,7 @@ class CarRaceEnv(gym.Env):
             # get the image from the camera
             self.observation = self.observe()
         else:
-            self.observation = 0
+            self.observation = [0]
 
         for wheel in range(p.getNumJoints(self.car)):
             p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)

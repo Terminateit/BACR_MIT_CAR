@@ -49,7 +49,7 @@ class CarRaceEnv(gym.Env):
         return [seed]
 
 
-    def reset(self, model_name=None, track_name=None, time=1000.0, dt=1./120., cameraStatus=False):
+    def reset(self, model_name=None, track_name=None, time=5000.0, dt=1./120., cameraStatus=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0
@@ -87,11 +87,11 @@ class CarRaceEnv(gym.Env):
         carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
  
         path = os.path.abspath(os.path.dirname(__file__))
-        self.car = p.loadURDF(model_path, carPos, carOrientation) 
+        self.car = p.loadURDF(model_path, carPos, carOrientation)
 
         if self.cameraStatus is True:
             # get the image from the camera
-            self.observation = self.observe()
+            self.observation = self.takeSnapshot()
         else:
             self.observation = np.array([0], dtype=np.int)
 
@@ -123,7 +123,7 @@ class CarRaceEnv(gym.Env):
         self.rayIds = []
         self.rayHitColor = [1, 0, 0]
         self.rayMissColor = [0, 1, 0]
-        rayLen = 8
+        rayLen = 4
         rayStartLen = 0.25
         for i in range (self.numRays):
             self.rayFrom.append([rayStartLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
@@ -161,8 +161,8 @@ class CarRaceEnv(gym.Env):
             p.setJointMotorControl2(self.car, steer, p.POSITION_CONTROL, targetPosition=-self.steeringAngle)
 
     def step(self, action):
-        # Apply control action (100 Hz)
-        if (self.currentTime - self.lastControlTime > 1/100.):
+        # Apply control action (60 Hz)
+        if (self.currentTime - self.lastControlTime > 1/60.):
             self.velocity = action[0]
             self.steeringAngle = action[1]
             self.force = action[2]
@@ -173,10 +173,10 @@ class CarRaceEnv(gym.Env):
             if (self.currentTime - self.lastCameraTime > 1.0):
                 self.lastCameraTime = self.currentTime
 
-                self.observation = self.observe()
+                self.observation = self.takeSnapshot()
             
-        # Update lidar data (20 Hz)
-        if (self.currentTime - self.lastLidarTime > .3):
+        # Update lidar data (60 Hz)
+        if (self.currentTime - self.lastLidarTime > 1/60.):
             self.lastLidarTime = self.currentTime
 
             numThreads = 0
@@ -185,6 +185,7 @@ class CarRaceEnv(gym.Env):
                 hitObjectUid = results[i][0]
                 hitFraction = results[i][2]
                 hitPosition = results[i][3]
+
                 if (hitFraction == 1.):
                     p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, replaceItemUniqueId=self.rayIds[i], parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
                 else:
@@ -202,12 +203,14 @@ class CarRaceEnv(gym.Env):
         else:
             done = False
 
-        reward = 0
+        carVelocity = p.getBaseVelocity(self.car)[0] # get linear velocity only
+        carSpeed = np.linalg.norm(carVelocity)
+        reward = carSpeed*self.dt
 
         return self.observation, reward, done, {}
     
 
-    def observe(self):
+    def takeSnapshot(self):
         # Create camera projection matrix
         fov = 60
         aspect = 1.0

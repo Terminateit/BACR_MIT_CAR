@@ -24,7 +24,7 @@ class CarRaceEnv(gym.Env):
         self.seed()
         self.viewer = None
 
-        p.connect(p.DIRECT)
+        p.connect(p.GUI)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())    
 
         self.velocityBound = 50 # 235RPM = 24,609142453 rad/sec
@@ -35,7 +35,8 @@ class CarRaceEnv(gym.Env):
                                         np.array([self.velocityBound, self.steerBound, 50]), dtype = np.float64)
 
         # Observation space - image from the camera on the car
-        self.observation_space = spaces.Box(low=0, high=255, shape=(IMAGE_H, IMAGE_W, 3), dtype=np.uint8)
+        self.numRays = 100 # number of lidar rays
+        self.observation_space = spaces.Box(low=np.zeros(self.numRays), high=np.ones(self.numRays), dtype=np.uint8)
 
         # Joint numbers
         self.lidar_joint = 4
@@ -43,13 +44,14 @@ class CarRaceEnv(gym.Env):
         self.rearWheels = [8, 15]
         self.steerWheels = [0, 2]
 
+
     
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
 
-    def reset(self, model_name=None, track_name=None, time=1000.0, dt=1./120., cameraStatus=False):
+    def reset(self, model_name=None, track_name=None, time=5000.0, dt=1./120., cameraStatus=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0
@@ -87,13 +89,11 @@ class CarRaceEnv(gym.Env):
         carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
  
         path = os.path.abspath(os.path.dirname(__file__))
-        self.car = p.loadURDF(model_path, carPos, carOrientation) 
+        self.car = p.loadURDF(model_path, carPos, carOrientation)
 
-        if self.cameraStatus is True:
-            # get the image from the camera
-            self.observation = self.observe()
-        else:
-            self.observation = [0]
+        self.snapshot = self.takeSnapshot()
+
+        self.observation = np.zeros(self.numRays, dtype=np.int)
 
         for wheel in range(p.getNumJoints(self.car)):
             p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
@@ -117,13 +117,12 @@ class CarRaceEnv(gym.Env):
         c = p.createConstraint(self.car, 3, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c,gearRatio=-1, gearAuxLink = 15, maxForce=10000)
 
-        self.numRays = 100
         self.rayFrom = []
         self.rayTo = []
         self.rayIds = []
         self.rayHitColor = [1, 0, 0]
         self.rayMissColor = [0, 1, 0]
-        rayLen = 8
+        rayLen = 4
         rayStartLen = 0.25
         for i in range (self.numRays):
             self.rayFrom.append([rayStartLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
@@ -161,8 +160,8 @@ class CarRaceEnv(gym.Env):
             p.setJointMotorControl2(self.car, steer, p.POSITION_CONTROL, targetPosition=-self.steeringAngle)
 
     def step(self, action):
-        # Apply control action (100 Hz)
-        if (self.currentTime - self.lastControlTime > 1/100.):
+        # Apply control action (60 Hz)
+        if (self.currentTime - self.lastControlTime > 1/60.):
             self.velocity = action[0]
             self.steeringAngle = action[1]
             self.force = action[2]
@@ -173,11 +172,13 @@ class CarRaceEnv(gym.Env):
             if (self.currentTime - self.lastCameraTime > 1.0):
                 self.lastCameraTime = self.currentTime
 
-                self.observation = self.observe()
+                self.snapshot = self.takeSnapshot()
             
-        # Update lidar data (20 Hz)
-        if (self.currentTime - self.lastLidarTime > .3):
+        # Update lidar data (60 Hz)
+        if (self.currentTime - self.lastLidarTime > 1/60.):
             self.lastLidarTime = self.currentTime
+
+            hitFractions = np.zeros(self.numRays, dtype=np.int8)
 
             numThreads = 0
             results = p.rayTestBatch(self.rayFrom, self.rayTo, numThreads, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
@@ -185,6 +186,9 @@ class CarRaceEnv(gym.Env):
                 hitObjectUid = results[i][0]
                 hitFraction = results[i][2]
                 hitPosition = results[i][3]
+                
+                hitFractions[i] = hitFraction
+
                 if (hitFraction == 1.):
                     p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, replaceItemUniqueId=self.rayIds[i], parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
                 else:
@@ -192,6 +196,9 @@ class CarRaceEnv(gym.Env):
                                   self.rayFrom[i][1] + hitFraction*(self.rayTo[i][1] - self.rayFrom[i][1]),
                                   self.rayFrom[i][2] + hitFraction*(self.rayTo[i][2] - self.rayFrom[i][2])]
                     p.addUserDebugLine(self.rayFrom[i], localHitTo, self.rayHitColor,replaceItemUniqueId=self.rayIds[i],parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
+            
+            self.observation = hitFractions
+            #print(self.observation)
 
         p.stepSimulation()
 
@@ -202,12 +209,14 @@ class CarRaceEnv(gym.Env):
         else:
             done = False
 
-        reward = 0
+        carVelocity = p.getBaseVelocity(self.car)[0] # get linear velocity only
+        carSpeed = np.linalg.norm(carVelocity)
+        reward = carSpeed*self.dt
 
         return self.observation, reward, done, {}
     
 
-    def observe(self):
+    def takeSnapshot(self):
         # Create camera projection matrix
         fov = 60
         aspect = 1.0
@@ -251,7 +260,7 @@ class CarRaceEnv(gym.Env):
             from gym.envs.classic_control import rendering
             if self.viewer is None:
                 self.viewer = rendering.SimpleImageViewer()
-            self.viewer.imshow(self.observation)
+            self.viewer.imshow(self.snapshot)
             return self.viewer.isopen
         else:
             return False

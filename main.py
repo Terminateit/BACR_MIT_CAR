@@ -2,8 +2,8 @@ import gym
 import racecar_v1
 import racecar_v2
 
-env = gym.make('racecar-v2')
-env.reset()
+env = gym.make('racecar-v1')
+env.reset(cameraStatus=True)
 
 while(True):
     env.render()

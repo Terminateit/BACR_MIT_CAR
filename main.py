@@ -1,15 +1,14 @@
 import gym
+import racecar_v1
 import racecar_v2
 
-track_name = 'barca_track.sdf'
-model_name = 'racecar_differential.urdf'
-useRealTimeSim = 0
-
 env = gym.make('racecar-v2')
-env.reset(model_name, track_name, useRealTimeSim)
+env.reset()
 
-while(True):
+done = False
+
+while(done is False):
     env.render()
-    observation, step_reward, done, _ =  env.step(env.action_space.sample())
-    
+    observation, reward, done, _ =  env.step(env.action_space.sample())
+
 env.close()

@@ -19,11 +19,6 @@ IMAGE_H = 320
 
 
 class CarRaceEnv(gym.Env):
-    metadata = {
-        'render.modes': ['human', 'rgb_array'],
-        'video.frames_per_second' : 60
-    }
- 
 
     def __init__(self):
         self.seed()
@@ -32,15 +27,8 @@ class CarRaceEnv(gym.Env):
         p.connect(p.GUI)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())    
 
-        self.reward = 0.0
-        
-        self.velocity = 0
         self.velocityBound = 50 # 235RPM = 24,609142453 rad/sec
-
-        self.steeringAngle = 0
         self.steerBound = 1
-
-        self.force = 0
         
         # Action space - [velocity, steering angle, force]
         self.action_space = spaces.Box(np.array([-self.velocityBound, -self.steerBound, 0]), 
@@ -61,24 +49,34 @@ class CarRaceEnv(gym.Env):
         return [seed]
 
 
-    def reset(self, model_name, track_name, useRealTimeSim):
-        self.reward = 0.0
+    def reset(self, model_name=None, track_name=None, time=1000.0, dt=1./120., cameraStatus=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0
 
+        if model_name is None:
+            model_name = 'racecar_differential.urdf'
+
+        if track_name is None:
+            track_name = 'barca_track.sdf'
+
+        self.dt = dt
+        self.time = time
+
+        self.cameraStatus = cameraStatus
+
         p.resetSimulation()
 
         p.setGravity(0, 0, -9.81)
-    
-        p.setTimeStep(1./120.)
-        self.useRealTimeSim = useRealTimeSim
-        p.setRealTimeSimulation(self.useRealTimeSim)
+
+        p.setTimeStep(self.dt)
+        useRealTimeSim = 0
+        p.setRealTimeSimulation(useRealTimeSim)
 
         model_path = os.path.join(os.path.dirname(__file__), 'f10_racecar', model_name)
         if not os.path.exists(model_path):
             raise IOError('Model file {} does not exist'.format(model_path))
-
+        
         track_path = os.path.join(os.path.dirname(__file__), 'f10_racecar/meshes', track_name)
         if not os.path.exists(track_path):
             raise IOError('Track file {} does not exist'.format(track_path))
@@ -91,8 +89,11 @@ class CarRaceEnv(gym.Env):
         path = os.path.abspath(os.path.dirname(__file__))
         self.car = p.loadURDF(model_path, carPos, carOrientation) 
 
-        # get the image from the camera
-        self.observation = self.observe()
+        if self.cameraStatus is True:
+            # get the image from the camera
+            self.observation = self.observe()
+        else:
+            self.observation = [0]
 
         for wheel in range(p.getNumJoints(self.car)):
             p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
@@ -137,8 +138,10 @@ class CarRaceEnv(gym.Env):
 
             self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
 
-        self.lastCameraTime = time.time()
-        self.lastLidarTime = time.time()
+        self.lastControlTime = 0
+        self.lastLidarTime = 0
+        self.lastCameraTime = 0
+        self.currentTime = 0
 
         return self.step(None)[0]
 
@@ -150,6 +153,7 @@ class CarRaceEnv(gym.Env):
         return carYaw
 
     def act(self):
+        self.lastControlTime = self.currentTime
         for wheel in self.rearWheels:
             p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=self.velocity, force=self.force)
             
@@ -157,32 +161,23 @@ class CarRaceEnv(gym.Env):
             p.setJointMotorControl2(self.car, steer, p.POSITION_CONTROL, targetPosition=-self.steeringAngle)
 
     def step(self, action):
-        step_reward = 0
-        done = False
-
-        if action is None:
-            self.velocity = 0
-            self.steeringAngle = 0
-            self.force = 0
-            self.act()
-        else:
+        # Apply control action (100 Hz)
+        if (self.currentTime - self.lastControlTime > 1/100.):
             self.velocity = action[0]
             self.steeringAngle = action[1]
             self.force = action[2]
             self.act()
 
-        # Update camera data (60Hz)
-        self.currentCameraTime = time.time()
-        if (self.currentCameraTime - self.lastCameraTime > 1.0):
-            self.lastCameraTime = self.currentCameraTime
+        if self.cameraStatus is True:
+            # Update camera data (1 Hz)
+            if (self.currentTime - self.lastCameraTime > 1.0):
+                self.lastCameraTime = self.currentTime
 
-            self.observation = self.observe()
+                self.observation = self.observe()
             
-        # Update lidar data (20Hz)
-        self.currentLidarTime = time.time()
-
-        if (self.currentLidarTime - self.lastLidarTime > .3):
-            self.lastLidarTime = self.currentLidarTime
+        # Update lidar data (20 Hz)
+        if (self.currentTime - self.lastLidarTime > .3):
+            self.lastLidarTime = self.currentTime
 
             numThreads = 0
             results = p.rayTestBatch(self.rayFrom, self.rayTo, numThreads, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
@@ -198,10 +193,18 @@ class CarRaceEnv(gym.Env):
                                   self.rayFrom[i][2] + hitFraction*(self.rayTo[i][2] - self.rayFrom[i][2])]
                     p.addUserDebugLine(self.rayFrom[i], localHitTo, self.rayHitColor,replaceItemUniqueId=self.rayIds[i],parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
 
-        if (self.useRealTimeSim == 0):
-            p.stepSimulation()
+        p.stepSimulation()
 
-        return self.observation, step_reward, done, {}
+        self.currentTime += self.dt
+        
+        if self.currentTime >= self.time:
+            done = True
+        else:
+            done = False
+
+        reward = 0
+
+        return self.observation, reward, done, {}
     
 
     def observe(self):
@@ -243,17 +246,17 @@ class CarRaceEnv(gym.Env):
         return rgbImg
 
 
-    def render(self, mode='human'):
-        assert mode in ['human', 'rgb_array']
-
-        if mode == 'rgb_array':
-            return self.observation
-        elif mode == 'human':
+    def render(self):
+        if self.cameraStatus is True:
             from gym.envs.classic_control import rendering
             if self.viewer is None:
                 self.viewer = rendering.SimpleImageViewer()
             self.viewer.imshow(self.observation)
             return self.viewer.isopen
+        else:
+            return False
+
+        
 
 
     def close(self):

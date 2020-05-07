@@ -41,9 +41,22 @@ class CarRaceEnv(gym.Env):
         self.action_space = spaces.Box(np.array([-self.velocityBound, -self.steerBound, 0]), 
                                         np.array([self.velocityBound, self.steerBound, 50]), dtype = np.float64)
 
-        # Observation space - image from the camera on the car
+        # Lidar properties
         self.numRays = 100 # number of lidar rays
-        self.observation_space = spaces.Box(low=np.zeros(self.numRays), high=np.ones(self.numRays), dtype=np.uint8)
+        self.rayFrom = []
+        self.rayTo = []
+        self.rayIds = []
+        self.rayHitColor = [1, 0, 0]
+        self.rayMissColor = [0, 1, 0]
+        self.rayLen = 4
+
+        # Observation space - image from the camera on the car
+        # if we use distances
+        self.observation_space = spaces.Box(low=np.zeros(self.numRays), high=np.full(self.numRays, self.rayLen), dtype=np.float64)
+        # if we use hitFractions
+        # self.observation_space = spaces.Box(low=np.zeros(self.numRays), high=np.ones(self.numRays), dtype=np.uint8)
+
+        self.snapshotNumber = 0
 
         # Joint numbers
         self.lidar_joint = 4
@@ -53,6 +66,11 @@ class CarRaceEnv(gym.Env):
 
         # Flag for the reset function
         self.world_does_exist = False
+
+        # Counter to set the done flag
+        self.stopThrehold = 100 # if the car is stuck more then this number of steps - reset
+
+
 
 
     def seed(self, seed=None):
@@ -106,12 +124,6 @@ class CarRaceEnv(gym.Env):
         c = p.createConstraint(self.car, 3, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c,gearRatio=-1, gearAuxLink = 15, maxForce=10000)
 
-        self.rayFrom = []
-        self.rayTo = []
-        self.rayIds = []
-        self.rayHitColor = [1, 0, 0]
-        self.rayMissColor = [0, 1, 0]
-        rayLen = 4
         rayStartLen = 0.25
         for i in range (self.numRays):
             self.rayFrom.append([rayStartLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
@@ -119,24 +131,24 @@ class CarRaceEnv(gym.Env):
                                  0
                                  ])
 
-            self.rayTo.append([rayLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
-                               rayLen*np.cos(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
+            self.rayTo.append([self.rayLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
+                               self.rayLen*np.cos(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
                                0
                                ])
 
             self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
 
 
-    def reset(self, model_name=None, track_name=None, cameraStatus=False):
+    def reset(self, model_name=None, track_name=None, cameraStatus=False, cameraSave=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0
 
         self.cameraStatus = cameraStatus
+        self.cameraSave = cameraSave
+        self.cameraDirectory = 'snapshots'
 
-        self.stopThrehold = 100 # if the car is stuck more then this number of steps - reset
         self.stuckCounter = 0 # reset stuck counter
-
 
         if self.world_does_exist is False:
             self.createWorld(model_name, track_name)
@@ -147,6 +159,9 @@ class CarRaceEnv(gym.Env):
             p.resetBasePositionAndOrientation(self.car, carPosition, carOrientation)
 
         if self.cameraStatus is True:
+            if self.cameraSave is True:
+                if not os.path.exists(self.cameraDirectory):
+                    os.makedirs(self.cameraDirectory)
             self.snapshot = self.takeSnapshot()
 
         self.observation = np.zeros(self.numRays, dtype=np.int)
@@ -195,6 +210,7 @@ class CarRaceEnv(gym.Env):
             self.lastLidarTime = self.currentTime
 
             hitFractions = np.zeros(self.numRays, dtype=np.int8)
+            distances = np.zeros(self.numRays, dtype=np.float64)
 
             numThreads = 0
             results = p.rayTestBatch(self.rayFrom, self.rayTo, numThreads, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
@@ -207,14 +223,17 @@ class CarRaceEnv(gym.Env):
 
                 if (hitFraction == 1.):
                     p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, replaceItemUniqueId=self.rayIds[i], parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
+                    distances[i] = self.rayLen
                 else:
                     localHitTo = [self.rayFrom[i][0] + hitFraction*(self.rayTo[i][0] - self.rayFrom[i][0]),
                                   self.rayFrom[i][1] + hitFraction*(self.rayTo[i][1] - self.rayFrom[i][1]),
                                   self.rayFrom[i][2] + hitFraction*(self.rayTo[i][2] - self.rayFrom[i][2])]
                     p.addUserDebugLine(self.rayFrom[i], localHitTo, self.rayHitColor,replaceItemUniqueId=self.rayIds[i],parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
+                    distances[i] = np.linalg.norm(np.array(localHitTo, dtype=np.float64) - self.rayFrom[i])
             
-            self.observation = hitFractions
-            #print(self.observation)
+            # self.observation = hitFractions
+            distances = distances / self.rayLen
+            self.observation = distances
 
         p.stepSimulation()
 
@@ -224,7 +243,7 @@ class CarRaceEnv(gym.Env):
         carSpeed = np.linalg.norm(carVelocity)
         reward = carSpeed*self.dt
 
-        if carSpeed <= 0.2:
+        if carSpeed <= 0.4:
             self.stuckCounter += 1
             #print(self.stuckCounter, carSpeed)
             
@@ -270,6 +289,12 @@ class CarRaceEnv(gym.Env):
                                                                     renderer=p.ER_BULLET_HARDWARE_OPENGL)
 
         rgbImg = Image.fromarray(rgbaImg).convert('RGB')
+        
+        if self.cameraSave is True:
+            savePath = os.path.join(self.cameraDirectory, 'snapshot' + str(self.snapshotNumber) + '.jpg')
+            rgbImg.save(savePath, "JPEG")
+            self.snapshotNumber += 1
+
         rgbImg = np.array(rgbImg)
         
         return rgbImg

@@ -25,8 +25,15 @@ class CarRaceEnv(gym.Env):
         self.viewer = None
 
         p.connect(p.GUI)
-        p.setAdditionalSearchPath(pybullet_data.getDataPath())    
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
+        p.setGravity(0, 0, -9.81)
+
+        self.dt = 1./120.
+        p.setTimeStep(self.dt)
+        useRealTimeSim = 0
+        p.setRealTimeSimulation(useRealTimeSim)
+        
         self.velocityBound = 50 # 235RPM = 24,609142453 rad/sec
         self.steerBound = 1
         
@@ -44,38 +51,25 @@ class CarRaceEnv(gym.Env):
         self.rearWheels = [8, 15]
         self.steerWheels = [0, 2]
 
+        # Flag for the reset function
+        self.world_does_exist = False
 
-    
+        # Counter to set the done flag
+        self.stopThrehold = 200 # if the car is stuck more then this number of steps - reset
+
+
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
 
-    def reset(self, model_name=None, track_name=None, dt=1./120., cameraStatus=False):
-        self.velocity = 0
-        self.steeringAngle = 0
-        self.force = 0
+    def createWorld(self, model_name, track_name):
 
         if model_name is None:
             model_name = 'racecar_differential.urdf'
 
         if track_name is None:
             track_name = 'barca_track.sdf'
-
-        self.dt = dt
-
-        self.cameraStatus = cameraStatus
-
-        self.stopThrehold = 100 # if the car is stuck more then this number of steps - reset
-        self.stuckCounter = 0 # reset stuck counter
-
-        p.resetSimulation()
-
-        p.setGravity(0, 0, -9.81)
-
-        p.setTimeStep(self.dt)
-        useRealTimeSim = 0
-        p.setRealTimeSimulation(useRealTimeSim)
 
         model_path = os.path.join(os.path.dirname(__file__), 'f10_racecar', model_name)
         if not os.path.exists(model_path):
@@ -87,16 +81,11 @@ class CarRaceEnv(gym.Env):
         
         self.track = p.loadSDF(track_path, globalScaling=1)
 
-        carPos = [0, 0, 0.15]
+        carPosition = [0, 0, 0.15]
         carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
  
         path = os.path.abspath(os.path.dirname(__file__))
-        self.car = p.loadURDF(model_path, carPos, carOrientation)
-
-        if self.cameraStatus is True:
-            self.snapshot = self.takeSnapshot()
-
-        self.observation = np.zeros(self.numRays, dtype=np.int)
+        self.car = p.loadURDF(model_path, carPosition, carOrientation)
 
         for wheel in range(p.getNumJoints(self.car)):
             p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
@@ -125,7 +114,7 @@ class CarRaceEnv(gym.Env):
         self.rayIds = []
         self.rayHitColor = [1, 0, 0]
         self.rayMissColor = [0, 1, 0]
-        rayLen = 4
+        rayLen = 3
         rayStartLen = 0.25
         for i in range (self.numRays):
             self.rayFrom.append([rayStartLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
@@ -139,6 +128,29 @@ class CarRaceEnv(gym.Env):
                                ])
 
             self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
+
+
+    def reset(self, model_name=None, track_name=None, cameraStatus=False):
+        self.velocity = 0
+        self.steeringAngle = 0
+        self.force = 0
+
+        self.cameraStatus = cameraStatus
+
+        self.stuckCounter = 0 # reset stuck counter
+
+        if self.world_does_exist is False:
+            self.createWorld(model_name, track_name)
+            self.world_does_exist = True
+        else:
+            carPosition = [0, 0, 0.15]
+            carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
+            p.resetBasePositionAndOrientation(self.car, carPosition, carOrientation)
+
+        if self.cameraStatus is True:
+            self.snapshot = self.takeSnapshot()
+
+        self.observation = np.zeros(self.numRays, dtype=np.int)
 
         self.lastControlTime = 0
         self.lastLidarTime = 0
@@ -154,6 +166,7 @@ class CarRaceEnv(gym.Env):
         carYaw = (carEuler[2]*360)/(2.*np.pi) - 90
         return carYaw
 
+
     def act(self):
         self.lastControlTime = self.currentTime
         for wheel in self.rearWheels:
@@ -162,9 +175,10 @@ class CarRaceEnv(gym.Env):
         for steer in self.steerWheels:
             p.setJointMotorControl2(self.car, steer, p.POSITION_CONTROL, targetPosition=-self.steeringAngle)
 
+
     def step(self, action):
-        # Apply control action (60 Hz)
-        if (self.currentTime - self.lastControlTime > 1/60.):
+        # Apply control action (120 Hz)
+        if (self.currentTime - self.lastControlTime > 1/120.):
             self.velocity = action[0]
             self.steeringAngle = action[1]
             self.force = action[2]
@@ -177,8 +191,8 @@ class CarRaceEnv(gym.Env):
 
                 self.snapshot = self.takeSnapshot()
             
-        # Update lidar data (60 Hz)
-        if (self.currentTime - self.lastLidarTime > 1/60.):
+        # Update lidar data (120 Hz)
+        if (self.currentTime - self.lastLidarTime > 1/120.):
             self.lastLidarTime = self.currentTime
 
             hitFractions = np.zeros(self.numRays, dtype=np.int8)
@@ -271,8 +285,6 @@ class CarRaceEnv(gym.Env):
             return self.viewer.isopen
         else:
             return False
-
-        
 
 
     def close(self):

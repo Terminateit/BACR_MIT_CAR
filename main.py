@@ -10,4 +10,4 @@ while(True):
     observation, reward, done, _ =  env.step(env.action_space.sample())
 
     if done:
-        break
+        env.reset(cameraStatus=True)

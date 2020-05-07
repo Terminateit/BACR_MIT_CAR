@@ -48,13 +48,10 @@ class CarRaceEnv(gym.Env):
         self.rayIds = []
         self.rayHitColor = [1, 0, 0]
         self.rayMissColor = [0, 1, 0]
-        self.rayLen = 4
+        self.rayLen = 8
 
-        # Observation space - image from the camera on the car
-        # if we use distances
-        self.observation_space = spaces.Box(low=np.zeros(self.numRays), high=np.full(self.numRays, self.rayLen), dtype=np.float64)
-        # if we use hitFractions
-        # self.observation_space = spaces.Box(low=np.zeros(self.numRays), high=np.ones(self.numRays), dtype=np.uint8)
+        # Observation space - lidar data
+        self.observation_space = spaces.Box(low=np.zeros(self.numRays), high=np.ones(self.numRays), dtype=np.float64)
 
         self.snapshotNumber = 0
 
@@ -243,7 +240,7 @@ class CarRaceEnv(gym.Env):
         carSpeed = np.linalg.norm(carVelocity)
         reward = carSpeed*self.dt
 
-        if carSpeed <= 0.4:
+        if carSpeed <= 0.3:
             self.stuckCounter += 1
             #print(self.stuckCounter, carSpeed)
             

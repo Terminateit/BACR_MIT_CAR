@@ -322,7 +322,7 @@ class CarRaceEnv(gym.Env):
         #    self.viewer.imshow(self.snapshot)
         #    return self.viewer.isopen
         #else:
-            return 0
+            return self.snapshot
 
     def close(self):
         if self.viewer is not None:

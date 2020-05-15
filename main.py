@@ -1,13 +1,38 @@
 import gym
+import numpy as np
+import matplotlib.pyplot as plt
+
 import racecar_v1
 import racecar_v2
 
 env = gym.make('racecar-v1')
-env.reset(storeData=False)
+env.reset(storeData=True)
+
+
+fig = plt.figure()
+ax = fig.gca()
+snapshot = np.zeros((64, 64, 3))
+render_object = ax.imshow(snapshot)
 
 while(True):
-    env.render()
+
+    snapshot = env.render()
+    
+    render_object.set_data(snapshot)
+    plt.draw()
+    plt.pause(1e-6)
+
+
     observation, reward, done, _ =  env.step(env.action_space.sample())
 
     if done:
         env.reset(cameraStatus=True, storeData=False)
+
+
+
+
+   
+    
+    
+	
+    

@@ -25,8 +25,8 @@ class CarRaceEnv(gym.Env):
         self.seed()
         self.viewer = None
 
-        #p.connect(p.GUI)
-        p.connect(p.DIRECT)
+        p.connect(p.GUI)
+        #p.connect(p.DIRECT)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
         p.setGravity(0, 0, -9.81)
@@ -138,12 +138,13 @@ class CarRaceEnv(gym.Env):
             self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
 
 
-    def reset(self, model_name=None, track_name=None, storeData=False):
+    def reset(self, model_name=None, track_name=None, cameraStatus=False, storeData=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0
 
         self.storeData = storeData
+        self.cameraStatus = cameraStatus
         self.cameraDirectory = 'snapshots'
 
         self.stuckCounter = 0 # reset stuck counter
@@ -156,20 +157,21 @@ class CarRaceEnv(gym.Env):
             carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
             p.resetBasePositionAndOrientation(self.car, carPosition, carOrientation)
 
-        if self.storeData is True:
-            # Create directory to store the snapshots
-            if not os.path.exists(self.cameraDirectory):
-                os.makedirs(self.cameraDirectory)
-            
-            # Open the dataset csv file
-            dataset_file = open('dataset.csv', 'a')
-            self.dataset = csv.writer(dataset_file, lineterminator='\n')
-            
-            # Write csv header
-            # columns = ['Current snapshot', 'Action space', 'Reward', 'Done', 'Next Snapshot']
-            # self.dataset.writerow(columns)
+        if cameraStatus is True:
+            if self.storeData is True:
+                # Create directory to store the snapshots
+                if not os.path.exists(self.cameraDirectory):
+                    os.makedirs(self.cameraDirectory)
+                
+                # Open the dataset csv file
+                dataset_file = open('dataset.csv', 'a')
+                self.dataset = csv.writer(dataset_file, lineterminator='\n')
+                
+                # Write csv header
+                # columns = ['Current snapshot', 'Action space', 'Reward', 'Done', 'Next Snapshot']
+                # self.dataset.writerow(columns)
 
-        self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
+            self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
 
         self.observation = np.zeros(self.numRays, dtype=np.int)
 
@@ -206,10 +208,11 @@ class CarRaceEnv(gym.Env):
             self.act()
 
         # Update camera data (120 Hz)
-        if (self.currentTime - self.lastCameraTime > 1/130.):
-            self.lastCameraTime = self.currentTime
+        if self.cameraStatus is True:
+            if (self.currentTime - self.lastCameraTime > 1/130.):
+                self.lastCameraTime = self.currentTime
 
-            self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
+                self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
         
         # Update lidar data (120 Hz)
         if (self.currentTime - self.lastLidarTime > self.dt):
@@ -312,7 +315,7 @@ class CarRaceEnv(gym.Env):
 
 
     def render(self, showCamera=False):
-        if showCamera is True:
+        if self.cameraStatus is True:
             from gym.envs.classic_control import rendering
             if self.viewer is None:
                 self.viewer = rendering.SimpleImageViewer()

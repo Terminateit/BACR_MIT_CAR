@@ -25,8 +25,8 @@ class CarRaceEnv(gym.Env):
         self.seed()
         self.viewer = None
 
-        p.connect(p.GUI)
-        #p.connect(p.DIRECT)
+        #p.connect(p.GUI)
+        p.connect(p.DIRECT)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
         p.setGravity(0, 0, -9.81)

@@ -96,7 +96,7 @@ class CarRaceEnv(gym.Env):
         self.track = p.loadSDF(track_path, globalScaling=1)
 
         carPosition = [0, 0, 0.15]
-        carOrientation = p.getQuaternionFromEuler([0, 0, np.pi+np.pi/3])
+        carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
  
         # path = os.path.abspath(os.path.dirname(__file__))
         self.car = p.loadURDF(model_path, carPosition, carOrientation)
@@ -311,12 +311,15 @@ class CarRaceEnv(gym.Env):
         return rgbImg, savePath, nextPath
 
 
-    def render(self):
-        from gym.envs.classic_control import rendering
-        if self.viewer is None:
-            self.viewer = rendering.SimpleImageViewer()
-        self.viewer.imshow(self.snapshot)
-        return self.viewer.isopen
+    def render(self, showCamera=False):
+        if showCamera is True:
+            from gym.envs.classic_control import rendering
+            if self.viewer is None:
+                self.viewer = rendering.SimpleImageViewer()
+            self.viewer.imshow(self.snapshot)
+            return self.viewer.isopen
+        else:
+            return 0
 
     def close(self):
         if self.viewer is not None:

@@ -6,7 +6,7 @@ import racecar_v1
 import racecar_v2
 
 env = gym.make('racecar-v1')
-env.reset(storeData=True)
+env.reset(storeData=False)
 
 
 fig = plt.figure()

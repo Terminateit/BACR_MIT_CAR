@@ -8,14 +8,15 @@ from gym.utils import seeding
 import os
 import time
 import numpy as np
+import csv
 from PIL import Image
 
 import pybullet as p
 import pybullet_data 
 
 
-IMAGE_W = 320
-IMAGE_H = 320
+IMAGE_W = 64
+IMAGE_H = 64
 
 
 class CarRaceEnv(gym.Env):
@@ -24,7 +25,8 @@ class CarRaceEnv(gym.Env):
         self.seed()
         self.viewer = None
 
-        p.connect(p.GUI)
+        #p.connect(p.GUI)
+        p.connect(p.DIRECT)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
         p.setGravity(0, 0, -9.81)
@@ -94,14 +96,14 @@ class CarRaceEnv(gym.Env):
         self.track = p.loadSDF(track_path, globalScaling=1)
 
         carPosition = [0, 0, 0.15]
-        carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
+        carOrientation = p.getQuaternionFromEuler([0, 0, np.pi+np.pi/3])
  
-        path = os.path.abspath(os.path.dirname(__file__))
+        # path = os.path.abspath(os.path.dirname(__file__))
         self.car = p.loadURDF(model_path, carPosition, carOrientation)
 
         for wheel in range(p.getNumJoints(self.car)):
             p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
-            p.getJointInfo(self.car, wheel)	
+            p.getJointInfo(self.car, wheel)
 
         c = p.createConstraint(self.car, 9, self.car, 11, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c,gearRatio=1, maxForce=10000)
@@ -136,13 +138,12 @@ class CarRaceEnv(gym.Env):
             self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
 
 
-    def reset(self, model_name=None, track_name=None, cameraStatus=False, cameraSave=False):
+    def reset(self, model_name=None, track_name=None, storeData=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0
 
-        self.cameraStatus = cameraStatus
-        self.cameraSave = cameraSave
+        self.storeData = storeData
         self.cameraDirectory = 'snapshots'
 
         self.stuckCounter = 0 # reset stuck counter
@@ -155,11 +156,20 @@ class CarRaceEnv(gym.Env):
             carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
             p.resetBasePositionAndOrientation(self.car, carPosition, carOrientation)
 
-        if self.cameraStatus is True:
-            if self.cameraSave is True:
-                if not os.path.exists(self.cameraDirectory):
-                    os.makedirs(self.cameraDirectory)
-            self.snapshot = self.takeSnapshot()
+        if self.storeData is True:
+            # Create directory to store the snapshots
+            if not os.path.exists(self.cameraDirectory):
+                os.makedirs(self.cameraDirectory)
+            
+            # Open the dataset csv file
+            dataset_file = open('dataset.csv', 'a')
+            self.dataset = csv.writer(dataset_file, lineterminator='\n')
+            
+            # Write csv header
+            # columns = ['Current snapshot', 'Action space', 'Reward', 'Done', 'Next Snapshot']
+            # self.dataset.writerow(columns)
+
+        self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
 
         self.observation = np.zeros(self.numRays, dtype=np.int)
 
@@ -189,21 +199,20 @@ class CarRaceEnv(gym.Env):
 
     def step(self, action):
         # Apply control action (120 Hz)
-        if (self.currentTime - self.lastControlTime > 1/120.):
+        if (self.currentTime - self.lastControlTime > self.dt):
             self.velocity = action[0]
             self.steeringAngle = action[1]
             self.force = action[2]
             self.act()
 
-        if self.cameraStatus is True:
-            # Update camera data (1 Hz)
-            if (self.currentTime - self.lastCameraTime > 1.0):
-                self.lastCameraTime = self.currentTime
+        # Update camera data (120 Hz)
+        if (self.currentTime - self.lastCameraTime > 1/130.):
+            self.lastCameraTime = self.currentTime
 
-                self.snapshot = self.takeSnapshot()
-            
+            self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
+        
         # Update lidar data (120 Hz)
-        if (self.currentTime - self.lastLidarTime > 1/120.):
+        if (self.currentTime - self.lastLidarTime > self.dt):
             self.lastLidarTime = self.currentTime
 
             hitFractions = np.zeros(self.numRays, dtype=np.int8)
@@ -249,6 +258,10 @@ class CarRaceEnv(gym.Env):
         else:
             done = False
 
+        if self.storeData is True:
+            datasetRow = [self.snapshotPath, action, reward, int(done), self.nextSnapshotPath]
+            self.dataset.writerow(datasetRow)
+
         return self.observation, reward, done, {}
     
 
@@ -287,26 +300,23 @@ class CarRaceEnv(gym.Env):
 
         rgbImg = Image.fromarray(rgbaImg).convert('RGB')
         
-        if self.cameraSave is True:
-            savePath = os.path.join(self.cameraDirectory, 'snapshot' + str(self.snapshotNumber) + '.jpg')
+        savePath = os.path.join(self.cameraDirectory, 'snapshot' + str(self.snapshotNumber) + '.jpg')
+        nextPath = os.path.join(self.cameraDirectory, 'snapshot' + str(self.snapshotNumber+1) + '.jpg')
+        if self.storeData is True:
             rgbImg.save(savePath, "JPEG")
             self.snapshotNumber += 1
 
         rgbImg = np.array(rgbImg)
         
-        return rgbImg
+        return rgbImg, savePath, nextPath
 
 
     def render(self):
-        if self.cameraStatus is True:
-            from gym.envs.classic_control import rendering
-            if self.viewer is None:
-                self.viewer = rendering.SimpleImageViewer()
-            self.viewer.imshow(self.snapshot)
-            return self.viewer.isopen
-        else:
-            return False
-
+        from gym.envs.classic_control import rendering
+        if self.viewer is None:
+            self.viewer = rendering.SimpleImageViewer()
+        self.viewer.imshow(self.snapshot)
+        return self.viewer.isopen
 
     def close(self):
         if self.viewer is not None:

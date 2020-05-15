@@ -138,7 +138,7 @@ class CarRaceEnv(gym.Env):
             self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
 
 
-    def reset(self, model_name=None, track_name=None, cameraStatus=False, storeData=False):
+    def reset(self, model_name=None, track_name=None, cameraStatus=True, storeData=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0
@@ -315,13 +315,13 @@ class CarRaceEnv(gym.Env):
 
 
     def render(self, showCamera=False):
-        if self.cameraStatus is True:
-            from gym.envs.classic_control import rendering
-            if self.viewer is None:
-                self.viewer = rendering.SimpleImageViewer()
-            self.viewer.imshow(self.snapshot)
-            return self.viewer.isopen
-        else:
+        #if self.cameraStatus is True:
+        #    from gym.envs.classic_control import rendering
+        #    if self.viewer is None:
+        #        self.viewer = rendering.SimpleImageViewer()
+        #    self.viewer.imshow(self.snapshot)
+        #    return self.viewer.isopen
+        #else:
             return 0
 
     def close(self):

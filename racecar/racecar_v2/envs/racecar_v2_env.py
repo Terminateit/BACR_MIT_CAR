@@ -8,14 +8,15 @@ from gym.utils import seeding
 import os
 import time
 import numpy as np
+import csv
 from PIL import Image
 
 import pybullet as p
 import pybullet_data 
 
 
-IMAGE_W = 320
-IMAGE_H = 320
+IMAGE_W = 64
+IMAGE_H = 64
 
 
 class CarRaceEnv(gym.Env):
@@ -24,54 +25,53 @@ class CarRaceEnv(gym.Env):
         self.seed()
         self.viewer = None
 
-        p.connect(p.GUI)
-        p.setAdditionalSearchPath(pybullet_data.getDataPath())    
+        #p.connect(p.GUI)
+        p.connect(p.DIRECT)
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
+        p.setGravity(0, 0, -9.81)
+
+        self.dt = 1./120.
+        p.setTimeStep(self.dt)
+        useRealTimeSim = 0
+        p.setRealTimeSimulation(useRealTimeSim)
+        
         self.velocityBound = 50 # 235RPM = 24,609142453 rad/sec
         self.steerBound = 1
         
         # Action space - [velocity, steering angle, force]
-        self.action_space = spaces.Box(np.array([-self.velocityBound, -self.steerBound, 0]), 
-                                        np.array([self.velocityBound, self.steerBound, 50]), dtype = np.float64)
+        self.action_space = spaces.Box(np.array([-self.velocityBound, -self.steerBound, 0]),
+                                       np.array([self.velocityBound, self.steerBound, 50]), dtype = np.float64)
 
-        # Observation space - image from the camera on the car
-        self.observation_space = spaces.Box(low=0, high=255, shape=(IMAGE_H, IMAGE_W, 3), dtype=np.uint8)
+        # Observation space - camera snapshot
+        self.observation_space = spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)
+
+        self.snapshotNumber = 0
 
         # Joint numbers
-        self.lidar_joint = 4
         self.camera_joint = 5
         self.rearWheels = [8, 15]
         self.steerWheels = [0, 2]
 
-    
+        # Flag for the reset function
+        self.world_does_exist = False
+
+        # Counter to set the done flag
+        self.stopThrehold = 100 # if the car is stuck more then this number of steps - reset
+
+
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
 
-    def reset(self, model_name=None, track_name=None, time=5000.0, dt=1./120., cameraStatus=False):
-        self.velocity = 0
-        self.steeringAngle = 0
-        self.force = 0
+    def createWorld(self, model_name, track_name):
 
         if model_name is None:
             model_name = 'racecar_differential.urdf'
 
         if track_name is None:
             track_name = 'barca_track.sdf'
-
-        self.dt = dt
-        self.time = time
-
-        self.cameraStatus = cameraStatus
-
-        p.resetSimulation()
-
-        p.setGravity(0, 0, -9.81)
-
-        p.setTimeStep(self.dt)
-        useRealTimeSim = 0
-        p.setRealTimeSimulation(useRealTimeSim)
 
         model_path = os.path.join(os.path.dirname(__file__), 'f10_racecar', model_name)
         if not os.path.exists(model_path):
@@ -83,21 +83,15 @@ class CarRaceEnv(gym.Env):
         
         self.track = p.loadSDF(track_path, globalScaling=1)
 
-        carPos = [0, 0, 0.15]
+        carPosition = [0, 0, 0.15]
         carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
  
-        path = os.path.abspath(os.path.dirname(__file__))
-        self.car = p.loadURDF(model_path, carPos, carOrientation)
-
-        if self.cameraStatus is True:
-            # get the image from the camera
-            self.observation = self.takeSnapshot()
-        else:
-            self.observation = np.array([0], dtype=np.int)
+        # path = os.path.abspath(os.path.dirname(__file__))
+        self.car = p.loadURDF(model_path, carPosition, carOrientation)
 
         for wheel in range(p.getNumJoints(self.car)):
             p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
-            p.getJointInfo(self.car, wheel)	
+            p.getJointInfo(self.car, wheel)
 
         c = p.createConstraint(self.car, 9, self.car, 11, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c,gearRatio=1, maxForce=10000)
@@ -117,40 +111,48 @@ class CarRaceEnv(gym.Env):
         c = p.createConstraint(self.car, 3, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c,gearRatio=-1, gearAuxLink = 15, maxForce=10000)
 
-        self.numRays = 100
-        self.rayFrom = []
-        self.rayTo = []
-        self.rayIds = []
-        self.rayHitColor = [1, 0, 0]
-        self.rayMissColor = [0, 1, 0]
-        rayLen = 4
-        rayStartLen = 0.25
-        for i in range (self.numRays):
-            self.rayFrom.append([rayStartLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
-                                 rayStartLen*np.cos(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
-                                 0
-                                 ])
 
-            self.rayTo.append([rayLen*np.sin(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
-                               rayLen*np.cos(-0.5*0.25*2.*np.pi+0.75*2.*np.pi*float(i)/self.numRays),
-                               0
-                               ])
+    def reset(self, model_name=None, track_name=None, cameraStatus=True, storeData=False):
+        self.velocity = 0
+        self.steeringAngle = 0
+        self.force = 0
 
-            self.rayIds.append(p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
+        self.storeData = storeData
+        self.cameraStatus = cameraStatus
+        self.cameraDirectory = 'snapshots'
+
+        self.stuckCounter = 0 # reset stuck counter
+
+        if self.world_does_exist is False:
+            self.createWorld(model_name, track_name)
+            self.world_does_exist = True
+        else:
+            carPosition = [0, 0, 0.15]
+            carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
+            p.resetBasePositionAndOrientation(self.car, carPosition, carOrientation)
+
+        if cameraStatus is True:
+            if self.storeData is True:
+                # Create directory to store the snapshots
+                if not os.path.exists(self.cameraDirectory):
+                    os.makedirs(self.cameraDirectory)
+                
+                # Open the dataset csv file
+                dataset_file = open('dataset.csv', 'a')
+                self.dataset = csv.writer(dataset_file, lineterminator='\n')
+                
+                # Write csv header
+                # columns = ['Current snapshot', 'Action space', 'Reward', 'Done', 'Next Snapshot']
+                # self.dataset.writerow(columns)
+
+            self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
 
         self.lastControlTime = 0
-        self.lastLidarTime = 0
         self.lastCameraTime = 0
         self.currentTime = 0
 
-        return self.step(None)[0]
+        return self.snapshot
 
-
-    def getCarYaw(self):
-        carPosition, carOrientation = p.getBasePositionAndOrientation(self.car)
-        carEuler = p.getEulerFromQuaternion(carOrientation)
-        carYaw = (carEuler[2]*360)/(2.*np.pi) - 90
-        return carYaw
 
     def act(self):
         self.lastControlTime = self.currentTime
@@ -160,54 +162,44 @@ class CarRaceEnv(gym.Env):
         for steer in self.steerWheels:
             p.setJointMotorControl2(self.car, steer, p.POSITION_CONTROL, targetPosition=-self.steeringAngle)
 
+
     def step(self, action):
-        # Apply control action (60 Hz)
-        if (self.currentTime - self.lastControlTime > 1/60.):
+        # Apply control action (120 Hz)
+        if (self.currentTime - self.lastControlTime > self.dt):
             self.velocity = action[0]
             self.steeringAngle = action[1]
             self.force = action[2]
             self.act()
 
+        # Update camera data (130 Hz)
         if self.cameraStatus is True:
-            # Update camera data (1 Hz)
-            if (self.currentTime - self.lastCameraTime > 1.0):
+            if (self.currentTime - self.lastCameraTime > 1/130.):
                 self.lastCameraTime = self.currentTime
 
-                self.observation = self.takeSnapshot()
-            
-        # Update lidar data (60 Hz)
-        if (self.currentTime - self.lastLidarTime > 1/60.):
-            self.lastLidarTime = self.currentTime
-
-            numThreads = 0
-            results = p.rayTestBatch(self.rayFrom, self.rayTo, numThreads, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
-            for i in range (self.numRays):
-                hitObjectUid = results[i][0]
-                hitFraction = results[i][2]
-                hitPosition = results[i][3]
-
-                if (hitFraction == 1.):
-                    p.addUserDebugLine(self.rayFrom[i], self.rayTo[i], self.rayMissColor, replaceItemUniqueId=self.rayIds[i], parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
-                else:
-                    localHitTo = [self.rayFrom[i][0] + hitFraction*(self.rayTo[i][0] - self.rayFrom[i][0]),
-                                  self.rayFrom[i][1] + hitFraction*(self.rayTo[i][1] - self.rayFrom[i][1]),
-                                  self.rayFrom[i][2] + hitFraction*(self.rayTo[i][2] - self.rayFrom[i][2])]
-                    p.addUserDebugLine(self.rayFrom[i], localHitTo, self.rayHitColor,replaceItemUniqueId=self.rayIds[i],parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint)
+                self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
 
         p.stepSimulation()
 
         self.currentTime += self.dt
-        
-        if self.currentTime >= self.time:
-            done = True
-        else:
-            done = False
 
         carVelocity = p.getBaseVelocity(self.car)[0] # get linear velocity only
         carSpeed = np.linalg.norm(carVelocity)
         reward = carSpeed*self.dt
 
-        return self.observation, reward, done, {}
+        if carSpeed <= 0.3:
+            self.stuckCounter += 1
+            #print(self.stuckCounter, carSpeed)
+            
+        if self.stuckCounter >= self.stopThrehold:
+            done = True
+        else:
+            done = False
+
+        if self.storeData is True:
+            datasetRow = [self.snapshotPath, action, reward, int(done), self.nextSnapshotPath]
+            self.dataset.writerow(datasetRow)
+
+        return self.snapshot, reward, done, {}
     
 
     def takeSnapshot(self):
@@ -240,27 +232,31 @@ class CarRaceEnv(gym.Env):
         width, height, rgbaImg, depthImg, segImg = p.getCameraImage(width=IMAGE_W,
                                                                     height=IMAGE_H,
                                                                     viewMatrix=viewMatrix,
-                                                                    projectionMatrix=projectionMatrix,
-                                                                    renderer=p.ER_BULLET_HARDWARE_OPENGL)
+                                                                    projectionMatrix=projectionMatrix)
+                                                                    #renderer=p.ER_BULLET_HARDWARE_OPENGL)
 
         rgbImg = Image.fromarray(rgbaImg).convert('RGB')
+        
+        savePath = os.path.join(self.cameraDirectory, 'snapshot' + str(self.snapshotNumber) + '.jpg')
+        nextPath = os.path.join(self.cameraDirectory, 'snapshot' + str(self.snapshotNumber+1) + '.jpg')
+        if self.storeData is True:
+            rgbImg.save(savePath, "JPEG")
+            self.snapshotNumber += 1
+
         rgbImg = np.array(rgbImg)
         
-        return rgbImg
+        return rgbImg, savePath, nextPath
 
 
     def render(self):
-        if self.cameraStatus is True:
-            from gym.envs.classic_control import rendering
-            if self.viewer is None:
-                self.viewer = rendering.SimpleImageViewer()
-            self.viewer.imshow(self.observation)
-            return self.viewer.isopen
-        else:
-            return False
-
-        
-
+        #if self.cameraStatus is True:
+        #    from gym.envs.classic_control import rendering
+        #    if self.viewer is None:
+        #        self.viewer = rendering.SimpleImageViewer()
+        #    self.viewer.imshow(self.snapshot)
+        #    return self.viewer.isopen
+        #else:
+            return self.snapshot
 
     def close(self):
         if self.viewer is not None:

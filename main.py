@@ -5,19 +5,18 @@ import matplotlib.pyplot as plt
 import racecar_v1
 import racecar_v2
 
-env = gym.make('racecar-v1')
-env.reset(storeData=False)
+env = gym.make('racecar-v2')
+env.reset(cameraStatus=True, storeData=False)
 
 
 fig = plt.figure()
 ax = fig.gca()
-snapshot = np.zeros((64, 64, 3))
+snapshot = np.zeros((64, 64, 3), dtype=np.uint8)
 render_object = ax.imshow(snapshot)
 
 while(True):
 
     snapshot = env.render()
-    
     render_object.set_data(snapshot)
     plt.draw()
     plt.pause(1e-6)
@@ -27,12 +26,3 @@ while(True):
 
     if done:
         env.reset(cameraStatus=True, storeData=False)
-
-
-
-
-   
-    
-    
-	
-    

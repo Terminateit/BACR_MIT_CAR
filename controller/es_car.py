@@ -377,7 +377,9 @@ def main(argv):
         if (isinstance(env.action_space, gym.spaces.box.Box)):
             from policy_car import GymPolicyCar
             print("Car Gym policy")
-            policy = GymPolicyCar(env, env.observation_space.shape[0], env.action_space.shape[0], env.action_space.low[0], env.action_space.high[0], ob, ac, filename, cseed, nrobots, heterogeneous, test, mkdir, device_use)
+            # Ninputs = hidden[0] size + latent mu size
+            n_inputs_car = 288
+            policy = GymPolicyCar(env, n_inputs_car, env.action_space.shape[0], env.action_space.low[0], env.action_space.high[0], ob, ac, filename, cseed, nrobots, heterogeneous, test, mkdir, device_use)
         else:
             from policy import GymPolicyDiscr
             policy = GymPolicyCar(env, env.observation_space.shape[0], env.action_space.n, 0.0, 0.0, ob, ac, filename, cseed, nrobots, heterogeneous, test,  mkdir, device_use)

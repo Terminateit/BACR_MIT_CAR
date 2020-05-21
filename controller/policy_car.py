@@ -227,7 +227,6 @@ class GymPolicyCar(Policy):
        
         vae_file = join(mkdir, 'CVAE500.pt' )
         rnn_file = join(mkdir, 'best.tar' )
-        print("VAE file", vae_file)
         assert exists(vae_file) and exists(rnn_file),\
             "Either vae or mdrnn is untrained."
 
@@ -250,28 +249,9 @@ class GymPolicyCar(Policy):
                                     transforms.ToPILImage(), 
                                     transforms.Resize(RED_SIZE),
                                     transforms.ToTensor()
-                                    ])                                     
+                                    ])                                   
                     
     
-    #Get action and transition
-    def get_action_and_transition(self, obs, hidden):
-        """ Get action and transition.
-        Encode obs to latent using the VAE, then obtain estimation for next
-        latent and next hidden state using the MDRNN and compute the controller
-        corresponding action.
-        :args obs: current observation (1 x 3 x 64 x 64) torch tensor
-        :args hidden: current hidden state (1 x 256) torch tensor
-        :returns: (action, next_hidden)
-            - action: 1D np array
-            - next_hidden (1 x 256) torch tensor
-        """
-        #Obtain latent vector
-        outputs, mu, logvar, z = self.vae(obs)
-        # Controller 
-        action = self.controller(mu, hidden[0])
-        
-        _, _, _, _, _, next_hidden = self.mdrnn(action, mu, hidden)
-        return action.squeeze().cpu().detach().numpy(), next_hidden
 
     # === Rollouts/training ===
     def rollout(self, ntrials, render=False, timestep_limit=None, seed=None):
@@ -296,6 +276,7 @@ class GymPolicyCar(Policy):
                 else:
                     normphase = 0
             # Reset environment
+            
             self.ob = self.env.reset()
             hidden = [torch.zeros(1, RSIZE).to(self.device) for _ in range (2)]
             # Reset network
@@ -305,17 +286,28 @@ class GymPolicyCar(Policy):
             t = 0
             #Update part
             while t < self.maxsteps:
-                # Copy the input in the network
-                self.nn.copyInput(np.float32(np.ravel(self.ob)))
-                # Activate network
-                self.nn.updateNet()
+        
                 #Observation
                 obs = self.transform(self.ob).unsqueeze(0).to(self.device)
-                # MDRNN + VAE
-                self.ac, hidden = self.get_action_and_transition(obs, hidden)
-                #print("Action", self.ac)
-                # Perform a step
-                self.ob, r, done, _ = self.env.step(self.ac)
+                #Obtain latent vector
+                outputs, mu, logvar, z = self.vae(obs)
+                inp_mu = mu.squeeze().cpu().detach().numpy().reshape(-1, 1)
+                #print("mu", inp_mu.shape)
+                inp_h = hidden[0].squeeze().cpu().detach().numpy().reshape(-1, 1)
+                #print("hidden", inp_h.shape)
+                inp  = np.vstack([inp_mu, inp_h])
+                #print("input", inp.shape)
+                # Copy the input in the network
+                self.nn.copyInput(np.float32(np.ravel(inp)))
+                # Activate network
+                self.nn.updateNet()
+                # Convert action to tensor
+                action = torch.from_numpy(self.ac).unsqueeze(0).to(self.device)
+                #MDRNN
+                _, _, _, _, _, next_hidden = self.mdrnn(action, mu, hidden)
+                hidden = next_hidden
+                #print(self.ac)
+                self.ob, r, done, _ =  self.env.step(self.ac)
                 # Append the reward
                 rew += r
                 t += 1

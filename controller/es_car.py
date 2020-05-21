@@ -231,7 +231,8 @@ BSIZE, SEQ_LEN = 1, 1
 ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
     3, 32, 256, 64, 64
 
-mkdir = '/content/evorobotpy/bin/models_dir'
+#mkdir = '/content/evorobotpy/bin/models_dir'
+mkdir = '/content/drive/My Drive/BACR_Project/Controller/evorobotpy/bin/models_dir'
 
 
 

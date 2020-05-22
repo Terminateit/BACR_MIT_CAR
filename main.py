@@ -21,7 +21,6 @@ while(True):
     plt.draw()
     plt.pause(1e-6)
 
-
     observation, reward, done, _ =  env.step(env.action_space.sample())
 
     if done:

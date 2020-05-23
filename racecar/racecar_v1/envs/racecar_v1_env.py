@@ -6,7 +6,6 @@ from gym import error, spaces, utils
 from gym.utils import seeding
 
 import os
-import time
 import numpy as np
 import csv
 from PIL import Image
@@ -55,8 +54,6 @@ class CarRaceEnv(gym.Env):
         # Observation space - lidar data
         self.observation_space = spaces.Box(low=np.zeros(self.numRays), high=np.ones(self.numRays), dtype=np.float64)
 
-        self.snapshotNumber = 0
-
         # Joint numbers
         self.lidar_joint = 4
         self.camera_joint = 5
@@ -74,7 +71,9 @@ class CarRaceEnv(gym.Env):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
+
     def createWorld(self, model_name, track_name):
+        self.resetCounter = 0
 
         if model_name is None:
             model_name = 'racecar_differential.urdf'
@@ -82,13 +81,11 @@ class CarRaceEnv(gym.Env):
         if track_name is None:
             track_name = 'barca_track.sdf'
 
-        model_path = os.path.join(os.path.dirname(
-            __file__), 'f10_racecar', model_name)
+        model_path = os.path.join(os.path.dirname(__file__), 'f10_racecar', model_name)
         if not os.path.exists(model_path):
             raise IOError('Model file {} does not exist'.format(model_path))
 
-        track_path = os.path.join(os.path.dirname(
-            __file__), 'f10_racecar/meshes', track_name)
+        track_path = os.path.join(os.path.dirname(__file__), 'f10_racecar/meshes', track_name)
         if not os.path.exists(track_path):
             raise IOError('Track file {} does not exist'.format(track_path))
 
@@ -101,34 +98,25 @@ class CarRaceEnv(gym.Env):
         self.car = p.loadURDF(model_path, carPosition, carOrientation)
 
         for wheel in range(p.getNumJoints(self.car)):
-            p.setJointMotorControl2(
-                self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
+            p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
             p.getJointInfo(self.car, wheel)
 
-        c = p.createConstraint(self.car, 9, self.car, 11, jointType=p.JOINT_GEAR, jointAxis=[
-                               0, 1, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, 0])
+        c = p.createConstraint(self.car, 9, self.car, 11, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c, gearRatio=1, maxForce=10000)
-        c = p.createConstraint(self.car, 10, self.car, 13, jointType=p.JOINT_GEAR, jointAxis=[
-                               0, 1, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, 0])
+        c = p.createConstraint(self.car, 10, self.car, 13, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c, gearRatio=-1, maxForce=10000)
-        c = p.createConstraint(self.car, 9, self.car, 13, jointType=p.JOINT_GEAR, jointAxis=[
-                               0, 1, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, 0])
+        c = p.createConstraint(self.car, 9, self.car, 13, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c, gearRatio=-1, maxForce=10000)
-        c = p.createConstraint(self.car, 16, self.car, 18, jointType=p.JOINT_GEAR, jointAxis=[
-                               0, 1, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, 0])
+        c = p.createConstraint(self.car, 16, self.car, 18, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c, gearRatio=1, maxForce=10000)
-        c = p.createConstraint(self.car, 16, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[
-                               0, 1, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, 0])
+        c = p.createConstraint(self.car, 16, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c, gearRatio=-1, maxForce=10000)
-        c = p.createConstraint(self.car, 17, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[
-                               0, 1, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, 0])
+        c = p.createConstraint(self.car, 17, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c, gearRatio=-1, maxForce=10000)
 
-        c = p.createConstraint(self.car, 1, self.car, 18, jointType=p.JOINT_GEAR, jointAxis=[
-                               0, 1, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, 0])
+        c = p.createConstraint(self.car, 1, self.car, 18, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c, gearRatio=-1, gearAuxLink=15, maxForce=10000)
-        c = p.createConstraint(self.car, 3, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[
-                               0, 1, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, 0])
+        c = p.createConstraint(self.car, 3, self.car, 19, jointType=p.JOINT_GEAR, jointAxis=[0,1,0], parentFramePosition=[0,0,0], childFramePosition=[0,0,0])
         p.changeConstraint(c, gearRatio=-1, gearAuxLink=15, maxForce=10000)
 
         rayStartLen = 0.25
@@ -150,6 +138,7 @@ class CarRaceEnv(gym.Env):
             self.rayIds.append(p.addUserDebugLine(
                 self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
 
+
     def reset(self, model_name=None, track_name=None, cameraStatus=True, storeData=False):
         self.velocity = 0
         self.steeringAngle = 0
@@ -159,16 +148,18 @@ class CarRaceEnv(gym.Env):
         self.cameraStatus = cameraStatus
         self.cameraDirectory = 'snapshots'
 
-        self.stuckCounter = 0  # reset stuck counter
+        # reset counters
+        self.stuckCounter = 0
+        self.stepCounter = 0
 
         if self.world_does_exist is False:
             self.createWorld(model_name, track_name)
             self.world_does_exist = True
         else:
+            self.resetCounter += 1
             carPosition = [0, 0, 0.15]
             carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
-            p.resetBasePositionAndOrientation(
-                self.car, carPosition, carOrientation)
+            p.resetBasePositionAndOrientation(self.car, carPosition, carOrientation)
 
         if cameraStatus is True:
             if self.storeData is True:
@@ -188,48 +179,32 @@ class CarRaceEnv(gym.Env):
 
         self.observation = np.zeros(self.numRays, dtype=np.int)
 
-        self.lastControlTime = 0
-        self.lastLidarTime = 0
-        self.lastCameraTime = 0
-        self.currentTime = 0
-
         return self.step(None)[0]
 
-    def getCarYaw(self):
-        carPosition, carOrientation = p.getBasePositionAndOrientation(self.car)
-        carEuler = p.getEulerFromQuaternion(carOrientation)
-        carYaw = (carEuler[2]*360)/(2.*np.pi) - 90
-        return carYaw
 
     def act(self):
-        self.lastControlTime = self.currentTime
         for wheel in self.rearWheels:
-            p.setJointMotorControl2(
-                self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=self.velocity, force=self.force)
+            p.setJointMotorControl2(self.car, wheel, p.VELOCITY_CONTROL, targetVelocity=self.velocity, force=self.force)
 
         for steer in self.steerWheels:
-            p.setJointMotorControl2(
-                self.car, steer, p.POSITION_CONTROL, targetPosition=-self.steeringAngle)
+            p.setJointMotorControl2(self.car, steer, p.POSITION_CONTROL, targetPosition=-self.steeringAngle)
+
 
     def step(self, action):
-        # Apply control action (120 Hz)
-        if (self.currentTime - self.lastControlTime > self.dt):
+        # Apply control action (120 Hz, each 1st step)
+        if (self.stepCounter % 1 == 0 and self.stepCounter != 0):
             self.velocity = action[0]
             self.steeringAngle = action[1]
             self.force = action[2]
             self.act()
 
-        # Update camera data (120 Hz)
+        # Update camera data (120 Hz, each 1st step)
         if self.cameraStatus is True:
-            if (self.currentTime - self.lastCameraTime > 1/130.):
-                self.lastCameraTime = self.currentTime
-
+            if (self.stepCounter % 1 == 0):
                 self.snapshot, self.snapshotPath, self.nextSnapshotPath = self.takeSnapshot()
 
-        # Update lidar data (120 Hz)
-        if (self.currentTime - self.lastLidarTime > self.dt):
-            self.lastLidarTime = self.currentTime
-
+        # Update lidar data (120 Hz, each 1st step)
+        if (self.stepCounter % 1 == 0):
             hitFractions = np.zeros(self.numRays, dtype=np.int8)
             distances = np.zeros(self.numRays, dtype=np.float64)
 
@@ -263,10 +238,7 @@ class CarRaceEnv(gym.Env):
 
         p.stepSimulation()
 
-        self.currentTime += self.dt
-
-        carVelocity = p.getBaseVelocity(
-            self.car)[0]  # get linear velocity only
+        carVelocity = p.getBaseVelocity(self.car)[0] # get linear velocity only
         carSpeed = np.linalg.norm(carVelocity)
         reward = carSpeed*self.dt
 
@@ -280,11 +252,14 @@ class CarRaceEnv(gym.Env):
             done = False
 
         if self.storeData is True:
-            datasetRow = [self.snapshotPath, action,
-                          reward, int(done), self.nextSnapshotPath]
+            datasetRow = [self.snapshotPath, action, reward, int(done), self.nextSnapshotPath]
             self.dataset.writerow(datasetRow)
 
+        # Update step counter
+        self.stepCounter += 1
+
         return self.observation, reward, done, {}
+
 
     def takeSnapshot(self):
         # Create camera projection matrix
@@ -292,12 +267,10 @@ class CarRaceEnv(gym.Env):
         aspect = 1.0
         nearPlane = 0.01
         farPlane = 100
-        projectionMatrix = p.computeProjectionMatrixFOV(
-            fov, aspect, nearPlane, farPlane)
+        projectionMatrix = p.computeProjectionMatrixFOV(fov, aspect, nearPlane, farPlane)
 
         # Get camera eye position and orientation in Cartesian world coordinates
-        cameraState = p.getLinkState(
-            self.car, self.camera_joint, computeForwardKinematics=True)
+        cameraState = p.getLinkState(self.car, self.camera_joint, computeForwardKinematics=True)
         eyePosition = cameraState[0]
         eyeOrientation = cameraState[1]
 
@@ -305,16 +278,15 @@ class CarRaceEnv(gym.Env):
         rotationMatrix = np.array(rotationMatrix).reshape(3, 3)
 
         # Find cameraTarget - position of the target (focus) point, in Cartesian world coordinates
-        initCameraVector = (1, 0, 0)  # x-axis
+        initCameraVector = (1, 0, 0) # x-axis
         cameraVector = rotationMatrix.dot(initCameraVector)
         cameraTarget = eyePosition + 10 * cameraVector
 
         # Find cameraUpVector - up vector of the camera, in Cartesian world coordinates
-        initUpVector = (0, 0, 1)  # z-axis
+        initUpVector = (0, 0, 1) # z-axis
         cameraUpVector = rotationMatrix.dot(initUpVector)
 
-        viewMatrix = p.computeViewMatrix(
-            eyePosition, cameraTarget, cameraUpVector)
+        viewMatrix = p.computeViewMatrix(eyePosition, cameraTarget, cameraUpVector)
 
         width, height, rgbaImg, depthImg, segImg = p.getCameraImage(width=IMAGE_W,
                                                                     height=IMAGE_H,
@@ -324,17 +296,15 @@ class CarRaceEnv(gym.Env):
 
         rgbImg = Image.fromarray(rgbaImg).convert('RGB')
 
-        savePath = os.path.join(self.cameraDirectory,
-                                'snapshot' + str(self.snapshotNumber) + '.jpg')
-        nextPath = os.path.join(
-            self.cameraDirectory, 'snapshot' + str(self.snapshotNumber+1) + '.jpg')
+        savePath = os.path.join(self.cameraDirectory, 'snapshot_' + str(self.resetCounter) + '_' + str(self.stepCounter) + '.jpg')
+        nextPath = os.path.join(self.cameraDirectory, 'snapshot_' + str(self.resetCounter) + '_' + str(self.stepCounter + 1) + '.jpg')
         if self.storeData is True:
             rgbImg.save(savePath, "JPEG")
-            self.snapshotNumber += 1
 
         rgbImg = np.array(rgbImg)
 
         return rgbImg, savePath, nextPath
+
 
     def render(self):
         # if self.cameraStatus is True:

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import racecar_v1
 import racecar_v2
 
-env = gym.make('racecar-v1')
+env = gym.make('racecar-v2')
 env.reset(cameraStatus=True, storeData=False)
 
 

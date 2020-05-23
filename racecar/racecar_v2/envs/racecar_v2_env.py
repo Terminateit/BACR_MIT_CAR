@@ -244,14 +244,15 @@ class CarRaceEnv(gym.Env):
 
 
     def render(self):
-        if self.cameraStatus is True:
-            from gym.envs.classic_control import rendering
-            if self.viewer is None:
-                self.viewer = rendering.SimpleImageViewer()
-            self.viewer.imshow(self.snapshot)
-            return self.snapshot
-        else:
-            return 0
+        #if self.cameraStatus is True:
+        #    from gym.envs.classic_control import rendering
+        #    if self.viewer is None:
+        #        self.viewer = rendering.SimpleImageViewer()
+        #    self.viewer.imshow(self.snapshot)
+        #    return self.snapshot
+        #else:
+        #    return 0
+        return self.snapshot
 
     def close(self):
         if self.viewer is not None:

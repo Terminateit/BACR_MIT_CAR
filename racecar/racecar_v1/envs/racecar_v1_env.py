@@ -94,7 +94,6 @@ class CarRaceEnv(gym.Env):
         carPosition = [0, 0, 0.15]
         carOrientation = p.getQuaternionFromEuler([0, 0, np.pi/3])
 
-        # path = os.path.abspath(os.path.dirname(__file__))
         self.car = p.loadURDF(model_path, carPosition, carOrientation)
 
         for wheel in range(p.getNumJoints(self.car)):
@@ -307,14 +306,14 @@ class CarRaceEnv(gym.Env):
 
 
     def render(self):
-        # if self.cameraStatus is True:
-        #    from gym.envs.classic_control import rendering
-        #    if self.viewer is None:
-        #        self.viewer = rendering.SimpleImageViewer()
-        #    self.viewer.imshow(self.snapshot)
-        #    return self.viewer.isopen
-        # else:
-        return self.snapshot
+        if self.cameraStatus is True:
+            from gym.envs.classic_control import rendering
+            if self.viewer is None:
+                self.viewer = rendering.SimpleImageViewer()
+            self.viewer.imshow(self.snapshot)
+            return self.snapshot
+        else:
+            return 0
 
     def close(self):
         if self.viewer is not None:

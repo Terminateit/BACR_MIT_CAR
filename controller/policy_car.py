@@ -313,8 +313,12 @@ class GymPolicyCar(Policy):
                 t += 1
                 if (self.test > 0):
                     if (self.test == 1):
-                        self.env.render()
-                        time.sleep(0.05)
+                        print('Snapshot ' + str(t) + ' is saved.    ')
+                        snapshot = self.env.render()
+                        rgbImg = Image.fromarray(snapshot).convert('RGB')
+                        savePath = os.path.join('./snapshot' + str(t) + '.jpg')
+                        rgbImg.save(savePath, "JPEG")
+                        #time.sleep(0.05)
                     if (self.test == 2):
                         info = 'Trial %d Step %d Fit %.2f %.2f' % (trial, t, r, rew)
                         renderWorld.update(self.objs, info, self.ob, self.ac, self.nact)

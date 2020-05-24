@@ -313,7 +313,7 @@ class GymPolicyCar(Policy):
                 t += 1
                 if (self.test > 0):
                     if (self.test == 1):
-                        print('Snapshot ' + str(t) + ' is saved.')
+                        print('Snapshot ' + str(t) + ' is saved.    ')
                         snapshot = self.env.render()
                         rgbImg = Image.fromarray(snapshot).convert('RGB')
                         savePath = os.path.join('./snapshot' + str(t) + '.jpg')

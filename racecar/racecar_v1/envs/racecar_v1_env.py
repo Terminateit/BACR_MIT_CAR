@@ -138,7 +138,7 @@ class CarRaceEnv(gym.Env):
                 self.rayFrom[i], self.rayTo[i], self.rayMissColor, parentObjectUniqueId=self.car, parentLinkIndex=self.lidar_joint))
 
 
-    def reset(self, model_name=None, track_name=None, cameraStatus=True, storeData=False):
+    def reset(self, model_name=None, track_name=None, cameraStatus=False, storeData=False):
         self.velocity = 0
         self.steeringAngle = 0
         self.force = 0

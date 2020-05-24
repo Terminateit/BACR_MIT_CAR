@@ -162,7 +162,7 @@ class CarRaceEnv(gym.Env):
 
     def step(self, action):
         # Apply control action (120 Hz, each 1st step)
-        if (self.stepCounter % 1 == 0):
+        if (self.stepCounter % 1 == 0 and self.stepCounter != 0):
             self.velocity = action[0]
             self.steeringAngle = action[1]
             self.force = action[2]
